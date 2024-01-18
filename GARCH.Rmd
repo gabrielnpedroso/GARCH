@@ -1,0 +1,134 @@
+---
+title: "Modelagem GARCH"
+author: "Gabriel, adaptado de Ricardo Rochman"
+date: "2023-11-10"
+output: word_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include = FALSE}
+# Leitura dos dados
+library(readxl)
+
+setwd("C:/Users/gabri/Documents/GitHub/GARCH")
+dados = read_excel("GARCH.xlsx")
+
+cotacao = data.frame(dados[1:2])
+retorno = data.frame(dados[-1,c(1,3)])
+
+library(xts)
+
+# transformando o retorno em série identificada pela data
+retorno = xts(retorno[,-1], order.by = retorno[,1])
+colnames(retorno)='logreturn'
+
+```
+
+### O gráfico da série
+
+```{r, echo = FALSE, message = FALSE, warning=FALSE}
+library(ggplot2)
+autoplot(retorno) + labs(title = "Modelo GARCH(1,1)",
+                         y ="logretorno IBOVESPA",
+                         x = "")
+```
+
+### Modelagem GJR-GARCH(1,1)
+
+```{r, echo = TRUE, message = FALSE, warning=FALSE}
+# Análise do retorno ao quadrado
+par(mfrow=c(1,2))
+acf(retorno^2);pacf(retorno^2)
+
+library(rugarch)
+# Especificação
+modelo1 = ugarchspec(variance.model = list(model = 'sGARCH', garchOrder = c(1,1)), 
+                         mean.model = list(armaOrder = c(0,0), include.mean = FALSE), 
+                         distribution.model = "std")
+# Chamada do modelo
+ajuste1 = ugarchfit(spec = modelo1, data = retorno)
+```
+
+### Métricas do modelo
+
+```{r, echo = TRUE, message = FALSE, warning=FALSE}
+omega = ajuste1@fit$coef['omega']
+alfa = ajuste1@fit$coef['alpha1']
+beta = ajuste1@fit$coef['beta1']
+gama = 1 - alfa - beta
+VL = omega/gama
+VLanualizado = sqrt(VL*252)*100
+
+Resultados = data.frame(omega,alfa,beta,gama,VL,VLanualizado)
+rownames(Resultados)='Valores'
+
+knitr::kable(t(Resultados))
+
+```
+
+O modelo1 pode ser escrito como:
+
+$$𝜎_t^2= 0.0000079 + 0.0724586 𝑟_{t−1}^2+ 0.8911457 𝜎_{t−1}^2.$$
+
+### Melhorias
+
+```{r, echo = FALSE, message = FALSE, warning=FALSE}
+library(forecast)
+par(mfrow=c(1,2))
+acf(retorno);pacf(retorno)
+auto.arima(retorno)
+
+modelo2 = ugarchspec(variance.model = list(model = 'sGARCH', garchOrder = c(1,1)), 
+                         mean.model = list(armaOrder = c(2,0), include.mean = FALSE), 
+                         distribution.model = "std")
+# Chamada do modelo
+ajuste2 = ugarchfit(spec = modelo2, data = retorno)
+
+ar1 = ajuste2@fit$coef['ar1']
+ar2 = ajuste2@fit$coef['ar2']
+omega = ajuste2@fit$coef['omega']
+alfa = ajuste2@fit$coef['alpha1']
+beta = ajuste2@fit$coef['beta1']
+gama = 1 - alfa - beta
+VL = omega/gama
+VLanualizado = sqrt(VL*252)*100
+
+Resultados = data.frame(ar1,ar2,omega,alfa,beta,gama,VL,VLanualizado)
+rownames(Resultados)='Valores'
+
+knitr::kable(t(Resultados))
+
+```
+
+O modelo2 pode ser escrito como:
+
+$$y_t = -0.04*y_{t−1} -0.01*y_{t−2} $$ e $$𝜎_t^2= 0.0000077 + 0.0704991*𝑟_{t−1}^2+ 0.8940430*𝜎_{t−1}^2.$$
+
+```{r, echo = FALSE, message = FALSE, warning=FALSE}
+
+ggplot(retorno,aes(x = cotacao$Data[-1])) +
+  geom_line(aes(y = (ajuste2@fit[["sigma"]]*sqrt(252)*100)),
+            color = "steelblue") +
+  geom_line(aes(y = VLanualizado), color = "darkred") +
+  labs(y = "Volatilidade Anualizada (% a.a.)", x = "Data")
+
+
+```
+
+### Previsão
+
+```{r, echo = FALSE, message = FALSE, warning=FALSE}
+
+previsao10 = ugarchforecast(ajuste1, n.ahead = 30)
+
+# Visualizar a previsão
+print(previsao10)
+
+par(mfrow = c(1,2))
+plot(previsao10)
+```
